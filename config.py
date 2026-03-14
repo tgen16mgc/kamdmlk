@@ -23,7 +23,7 @@ ENTRY_WINDOW_MAX = 140  # seconds remaining (2 min 20 sec) - enter no earlier
 ENTRY_WINDOW_MIN = 60   # seconds remaining (1 min) - enter no later
 ENTRY_PRICE_MIN = 0.60  # minimum acceptable token price for entry
 ENTRY_PRICE_MAX = 0.70  # maximum acceptable token price for entry
-BTC_MOMENTUM_MIN = 43.0  # minimum BTC price change ($) from candle open
+BTC_MOMENTUM_MIN = 26.0  # minimum BTC price change ($) from candle open
 MOMENTUM_VELOCITY_WINDOW = 15  # seconds to check momentum velocity
 MAX_SPREAD = 0.05  # max bid-ask spread to accept entry
 
@@ -35,7 +35,7 @@ BREAKEVEN_TIME_STOP_SECONDS = 35  # exit early if price <= entry with this many 
 HARD_TIME_STOP_SECONDS = 20  # absolute hard exit — sell no matter what below this
 
 # ── Bet Sizing ────────────────────────────────────────────────────────────────
-BET_SIZE = 2.5   # default bet in USDC
+BET_SIZE = 2   # default bet in USDC
 ALL_IN = False   # if True, use full USDC balance instead of BET_SIZE
 
 # ── Risk Management ──────────────────────────────────────────────────────────
