@@ -48,6 +48,11 @@ BUY_REJECT_COOLDOWN = 1    # seconds to wait after a buy rejection before retryi
 SELL_MAX_RETRIES = 5         # after this many FOK failures, switch to FAK
 SELL_FAK_ATTEMPTS = 3        # FAK attempts before giving up and letting market resolve
 
+# ── Proxy (optional) ─────────────────────────────────────────────────────────
+# Set PROXY_URL in environment to route all traffic through a proxy.
+# Format: http://user:pass@host:port  or  http://host:port
+PROXY_URL = os.getenv("PROXY_URL", "")  # empty = no proxy
+
 # ── Timing ────────────────────────────────────────────────────────────────────
 STRATEGY_LOOP_INTERVAL = 0.1  # seconds between strategy ticks
 MARKET_POLL_INTERVAL = 3.0    # seconds between Gamma API polls

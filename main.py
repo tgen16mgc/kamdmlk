@@ -1,10 +1,17 @@
 import asyncio
 import logging
+import os
 import signal
 import time
 from datetime import datetime, timezone
 
 import config
+
+# Propagate PROXY_URL to standard env vars so all HTTP libraries (including
+# py-clob-client's internal requests session) pick it up automatically.
+if config.PROXY_URL:
+    os.environ.setdefault("HTTP_PROXY", config.PROXY_URL)
+    os.environ.setdefault("HTTPS_PROXY", config.PROXY_URL)
 from logger_setup import setup_logging
 from state import BotState
 from trader import Trader

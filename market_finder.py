@@ -33,6 +33,12 @@ def _next_5min_timestamps() -> list[int]:
     return [current_boundary + i * INTERVAL for i in range(0, 8)]
 
 
+def _proxies() -> dict | None:
+    if config.PROXY_URL:
+        return {"http": config.PROXY_URL, "https": config.PROXY_URL}
+    return None
+
+
 def fetch_market_by_slug(slug: str) -> dict | None:
     """Fetch a single event by its slug from the Gamma API."""
     try:
@@ -40,6 +46,7 @@ def fetch_market_by_slug(slug: str) -> dict | None:
             f"{config.GAMMA_HOST}/events",
             params={"slug": slug},
             timeout=8,
+            proxies=_proxies(),
         )
         resp.raise_for_status()
         data = resp.json()

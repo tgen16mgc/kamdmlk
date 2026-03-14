@@ -20,10 +20,12 @@ async def run_price_feed(state: BotState):
     """
     while state.running:
         try:
+            proxy_kwargs = {"proxy": config.PROXY_URL} if config.PROXY_URL else {}
             async with websockets.connect(
                 config.RTDS_WS,
                 ping_interval=None,
                 close_timeout=5,
+                **proxy_kwargs,
             ) as ws:
                 sub_msg = json.dumps({
                     "action": "subscribe",

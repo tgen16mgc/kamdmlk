@@ -25,9 +25,11 @@ async def run_market_feed(state: BotState):
         current_down = state.down_token_id
 
         try:
+            proxy_kwargs = {"proxy": config.PROXY_URL} if config.PROXY_URL else {}
             async with websockets.connect(
                 config.MARKET_WS,
                 ping_interval=None,
+                **proxy_kwargs,
                 close_timeout=5,
             ) as ws:
                 sub_msg = json.dumps({
