@@ -52,3 +52,33 @@ def notify_trade(action: str, details: str, pnl: float | None = None, balance: f
     if balance is not None:
         lines.append(f"Balance: <b>${balance:.2f}</b>")
     _send("\n".join(lines))
+
+
+def notify_daily_report(
+    wins: int,
+    losses: int,
+    session_pnl: float,
+    balance: float,
+    starting_balance: float,
+    btc_price: float | None = None,
+):
+    total = wins + losses
+    winrate = (wins / total * 100) if total > 0 else 0
+    pnl_sign = "+" if session_pnl >= 0 else ""
+    pnl_emoji = "📈" if session_pnl >= 0 else "📉"
+
+    from datetime import datetime
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    lines = [
+        f"📊 <b>Daily Report</b>  —  {now}",
+        "",
+        f"W / L:       <b>{wins} / {losses}</b>  ({winrate:.0f}% win rate)",
+        f"Session PnL: <b>{pnl_sign}${session_pnl:.2f}</b> {pnl_emoji}",
+        f"Balance:     <b>${balance:.2f}</b>",
+        f"Start bal:   <b>${starting_balance:.2f}</b>",
+    ]
+    if btc_price is not None:
+        lines.append(f"BTC price:   <b>${btc_price:,.0f}</b>")
+
+    _send("\n".join(lines))

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import signal
 import time
+from datetime import datetime, timezone
 
 import config
 from logger_setup import setup_logging
@@ -66,6 +67,34 @@ async def market_discovery_loop(state: BotState):
             logger.error(f"Market discovery error: {e}", exc_info=True)
 
         await asyncio.sleep(config.MARKET_POLL_INTERVAL)
+
+
+async def daily_report_loop(state: BotState, trader: Trader):
+    """Send a summary report to Telegram twice a day at 08:00 and 20:00 UTC."""
+    from telegram_notify import notify_daily_report
+    report_hours = {8, 20}
+    last_reported_hour: int = -1
+
+    while state.running:
+        try:
+            now_utc = datetime.now(timezone.utc)
+            if now_utc.hour in report_hours and now_utc.hour != last_reported_hour:
+                last_reported_hour = now_utc.hour
+                balance = trader.get_usdc_balance()
+                notify_daily_report(
+                    wins=state.wins,
+                    losses=state.losses,
+                    session_pnl=state.session_pnl,
+                    balance=balance,
+                    starting_balance=state.starting_balance,
+                    btc_price=state.btc_current,
+                )
+                logger.info(f"Daily report sent (UTC {now_utc.hour:02d}:00)")
+            elif now_utc.hour not in report_hours:
+                last_reported_hour = -1  # reset so next window fires
+        except Exception as e:
+            logger.debug(f"Daily report error: {e}")
+        await asyncio.sleep(60)  # check every minute
 
 
 async def price_polling_fallback(state: BotState, trader: Trader):
@@ -162,6 +191,7 @@ async def main():
         asyncio.create_task(strategy_loop(strategy, state), name="strategy"),
         asyncio.create_task(trader.heartbeat_loop(state), name="heartbeat"),
         asyncio.create_task(price_polling_fallback(state, trader), name="price_poll"),
+        asyncio.create_task(daily_report_loop(state, trader), name="daily_report"),
     ]
 
     logger.info("All systems running. Waiting for market...")
