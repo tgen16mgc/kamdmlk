@@ -68,8 +68,10 @@ async def run_price_feed(state: BotState):
                                     if now - _last_btc_log >= 2.0:
                                         _last_btc_log = now
                                         mom = state.btc_momentum()
+                                        vel = state.btc_velocity(config.MOMENTUM_VELOCITY_WINDOW)
                                         mom_str = f"mom=${mom:+.2f}" if mom is not None else "mom=N/A"
-                                        logger.info(f"BTC=${float(price):,.2f} | {mom_str}")
+                                        vel_str = f"vel={vel:+.4f}/s" if vel is not None else "vel=N/A"
+                                        logger.info(f"BTC=${float(price):,.2f} | {mom_str} | {vel_str}")
                 finally:
                     ping_task.cancel()
                     try:
