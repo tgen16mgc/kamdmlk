@@ -235,7 +235,8 @@ class Trader:
             # PolyApiException means the CLOB API returned an HTTP error or the
             # request failed at the network level.  In either case the order was
             # almost certainly NOT accepted, so a short cooldown is sufficient.
-            if self._verify_buy_filled(state, token_id, direction, worst_price, amount, f"poly_error({e.status_code})", pre_balance):
+            status_label = "network" if e.status_code is None else f"HTTP {e.status_code}"
+            if self._verify_buy_filled(state, token_id, direction, worst_price, amount, f"poly_error({status_label})", pre_balance):
                 return True
 
             state.buy_blocked_until = time.time() + config.BUY_REJECT_COOLDOWN
