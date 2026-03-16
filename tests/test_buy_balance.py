@@ -221,8 +221,6 @@ class TestBuyBalanceVerification(unittest.TestCase):
         trader = _FakeTrader()
         state = _make_state_no_position()
 
-        trader.client.create_market_order.return_value = "mock_order"
-        trader.client.post_order.return_value = {"status": "REJECTED", "orderID": "abc"}
         # Pre-balance shows 3.0 tokens — settled from a prior failed buy
         trader._token_balances = [3.0]
 
@@ -232,6 +230,7 @@ class TestBuyBalanceVerification(unittest.TestCase):
         self.assertIsNotNone(state.position, "Position should be opened")
         self.assertAlmostEqual(state.position.shares, 3.0)
         # Must NOT have placed an order (duplicate prevention)
+        trader.client.create_market_order.assert_not_called()
         trader.client.post_order.assert_not_called()
 
     def test_buy_preflight_guard_skips_on_dust(self, _mock_sleep):
