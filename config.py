@@ -19,15 +19,18 @@ RTDS_WS = "wss://ws-live-data.polymarket.com"
 MARKET_WS = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 
 # ── Entry Conditions ──────────────────────────────────────────────────────────
-ENTRY_WINDOW_MAX = 140  # seconds remaining (2 min 20 sec) - enter no earlier
-ENTRY_WINDOW_MIN = 60   # seconds remaining (1 min) - enter no later
-ENTRY_PRICE_MIN = 0.60  # minimum acceptable token price for entry
-ENTRY_PRICE_MAX = 0.70  # maximum acceptable token price for entry
-BTC_MOMENTUM_MIN = 45.0  # minimum BTC price change ($) from candle open
-BTC_MOMENTUM_HIGH = 65.0  # momentum threshold to shift entry price range
+ENTRY_WINDOW_MAX = 160  # seconds remaining (2 min 40 sec) - enter no earlier
+ENTRY_WINDOW_MIN = 50   # seconds remaining (0:50) - enter no later
+ENTRY_PRICE_MIN = 0.60  # minimum acceptable token price for entry (medium momentum)
+ENTRY_PRICE_MAX = 0.70  # maximum acceptable token price for entry (medium momentum)
+BTC_MOMENTUM_MIN = 30.0  # minimum BTC price change ($) from candle open (low tier)
+BTC_MOMENTUM_MED = 45.0  # medium momentum threshold (original minimum)
+BTC_MOMENTUM_HIGH = 65.0  # high momentum threshold to shift entry price range
+ENTRY_PRICE_MIN_LOW_MOM = 0.52   # min entry price when momentum < BTC_MOMENTUM_MED
+ENTRY_PRICE_MAX_LOW_MOM = 0.60   # max entry price when momentum < BTC_MOMENTUM_MED
 ENTRY_PRICE_MIN_HIGH_MOM = 0.65  # min entry price when momentum >= BTC_MOMENTUM_HIGH
 ENTRY_PRICE_MAX_HIGH_MOM = 0.75  # max entry price when momentum >= BTC_MOMENTUM_HIGH
-MOMENTUM_VELOCITY_WINDOW = 15  # seconds to check momentum velocity
+MOMENTUM_VELOCITY_WINDOW = 10  # seconds to check momentum velocity
 MAX_SPREAD = 0.05  # max bid-ask spread to accept entry
 
 # ── Exit Conditions ───────────────────────────────────────────────────────────

@@ -155,7 +155,14 @@ async def main():
         f"Time stop: {config.TIME_STOP_SECONDS}s (hard: {config.HARD_TIME_STOP_SECONDS}s) | "
         f"Breakeven stop: {config.BREAKEVEN_TIME_STOP_SECONDS}s"
     )
-    logger.info(f"BTC momentum min: ${config.BTC_MOMENTUM_MIN}")
+    logger.info(
+        f"BTC momentum tiers: low=${config.BTC_MOMENTUM_MIN} "
+        f"(${config.ENTRY_PRICE_MIN_LOW_MOM}-${config.ENTRY_PRICE_MAX_LOW_MOM}) | "
+        f"med=${config.BTC_MOMENTUM_MED} "
+        f"(${config.ENTRY_PRICE_MIN}-${config.ENTRY_PRICE_MAX}) | "
+        f"high=${config.BTC_MOMENTUM_HIGH} "
+        f"(${config.ENTRY_PRICE_MIN_HIGH_MOM}-${config.ENTRY_PRICE_MAX_HIGH_MOM})"
+    )
     logger.info(f"Session stop-loss: {config.SESSION_STOP_LOSS_PCT * 100:.0f}% of starting balance")
     logger.info("=" * 60)
 
