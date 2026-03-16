@@ -90,13 +90,16 @@ class MomentumStrategy:
         if direction == "Down" and velocity >= 0:
             return
 
-        # Condition 6: Entry price range (higher momentum justifies paying more)
+        # Condition 6: Entry price range (3-tier: higher momentum justifies paying more)
         if abs_momentum >= config.BTC_MOMENTUM_HIGH:
             entry_min = config.ENTRY_PRICE_MIN_HIGH_MOM
             entry_max = config.ENTRY_PRICE_MAX_HIGH_MOM
-        else:
+        elif abs_momentum >= config.BTC_MOMENTUM_MED:
             entry_min = config.ENTRY_PRICE_MIN
             entry_max = config.ENTRY_PRICE_MAX
+        else:
+            entry_min = config.ENTRY_PRICE_MIN_LOW_MOM
+            entry_max = config.ENTRY_PRICE_MAX_LOW_MOM
 
         token_price = s.best_ask_for(direction) or s.last_trade_for(direction)
         if token_price is None:

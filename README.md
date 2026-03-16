@@ -6,7 +6,7 @@ Automated trading bot for Polymarket's 5-minute BTC up/down prediction markets.
 
 Buys the momentum direction (Up or Down token) when BTC shows strong directional movement within a strict time window, then exits via take-profit, stop-loss, or time-stop rules.
 
-**Entry**: 2:20 to 1:00 remaining | token price $0.60-$0.70 | BTC moved $40+ from candle open | momentum still accelerating
+**Entry**: 3:00 to 0:45 remaining | 3-tier momentum system: BTC $30+ move → token $0.52-$0.60, BTC $45+ → $0.60-$0.70, BTC $65+ → $0.65-$0.75 | momentum still accelerating
 
 **Exit**: TP at $0.88 | SL at $0.30 | Time stop at 30s remaining
 
