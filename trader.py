@@ -215,7 +215,7 @@ class Trader:
         # is effectively zero, close the position immediately.
         if total_attempts > 0:
             actual_balance = self.get_token_balance(pos.token_id)
-            if actual_balance is not None and actual_balance < 0.01:
+            if actual_balance is not None and actual_balance < config.SELL_FILLED_BALANCE_THRESHOLD:
                 exit_price = state.best_bid_for(pos.side) or pos.entry_price
                 pnl = (exit_price - pos.entry_price) * pos.shares
                 state.close_position(exit_price, reason)

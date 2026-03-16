@@ -53,6 +53,7 @@ SESSION_STOP_LOSS_PCT = 0.60  # stop trading after losing this % of starting bal
 BUY_REJECT_COOLDOWN = 1    # seconds to wait after a buy rejection before retrying
 SELL_MAX_RETRIES = 5         # after this many FOK failures, switch to FAK
 SELL_FAK_ATTEMPTS = 3        # FAK attempts before giving up and letting market resolve
+SELL_FILLED_BALANCE_THRESHOLD = 0.01  # token balance below this = position already sold
 
 # ── Proxy (optional) ─────────────────────────────────────────────────────────
 # Set PROXY_URL in environment to route all traffic through a proxy.
