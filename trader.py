@@ -11,6 +11,7 @@ from py_clob_client.clob_types import (
     BalanceAllowanceParams,
     AssetType,
 )
+from py_clob_client.exceptions import PolyApiException
 from py_clob_client.order_builder.constants import BUY, SELL
 
 import config
@@ -96,6 +97,12 @@ class Trader:
             )
             balance = float(result.get("balance", 0)) / 1e6  # USDC has 6 decimals
             return balance
+        except PolyApiException as e:
+            if e.status_code is None:
+                logger.error(f"Failed to fetch USDC balance (network error): {e}")
+            else:
+                logger.error(f"Failed to fetch USDC balance (HTTP {e.status_code}): {e}")
+            return 0.0
         except Exception as e:
             logger.error(f"Failed to fetch USDC balance: {e}")
             return 0.0
@@ -113,6 +120,12 @@ class Trader:
             )
             balance = float(result.get("balance", 0)) / 1e6
             return balance
+        except PolyApiException as e:
+            if e.status_code is None:
+                logger.debug(f"Failed to fetch token balance (network error): {e}")
+            else:
+                logger.debug(f"Failed to fetch token balance (HTTP {e.status_code}): {e}")
+            return None
         except Exception as e:
             logger.debug(f"Failed to fetch token balance: {e}")
             return None
@@ -207,6 +220,24 @@ class Trader:
             # Reset cooldown AFTER verification so the window starts fresh.
             # (Verification takes ~FILL_VERIFY_DELAY * FILL_VERIFY_RETRIES
             # seconds; setting cooldown before would expire during that wait.)
+            state.buy_blocked_until = time.time() + config.BUY_REJECT_COOLDOWN
+            return False
+
+        except PolyApiException as e:
+            if e.status_code is None:
+                logger.error(
+                    f"BUY order network error: {e} — request likely never reached "
+                    f"the exchange. Check connectivity, geo-restrictions, and proxy settings."
+                )
+            else:
+                logger.error(f"BUY order API error (HTTP {e.status_code}): {e}")
+
+            # PolyApiException means the CLOB API returned an HTTP error or the
+            # request failed at the network level.  In either case the order was
+            # almost certainly NOT accepted, so a short cooldown is sufficient.
+            if self._verify_buy_filled(state, token_id, direction, worst_price, amount, f"poly_error({e.status_code})", pre_balance):
+                return True
+
             state.buy_blocked_until = time.time() + config.BUY_REJECT_COOLDOWN
             return False
 
@@ -462,6 +493,22 @@ class Trader:
                     f"attempt {total_attempts + 1}/{config.SELL_MAX_RETRIES}, "
                     f"will escalate to FAK after {config.SELL_MAX_RETRIES}"
                 )
+            return False
+
+        except PolyApiException as e:
+            if e.status_code is None:
+                logger.error(
+                    f"SELL order network error: {e} — request likely never reached "
+                    f"the exchange. Check connectivity, geo-restrictions, and proxy settings."
+                )
+            else:
+                logger.error(f"SELL order API error (HTTP {e.status_code}): {e}")
+            state.mark_sell_failed()
+
+            # Verify on-chain: sell may have filled despite the error
+            if self._verify_sell_filled(state, reason, pre_balance=actual_balance):
+                return True
+
             return False
 
         except Exception as e:
