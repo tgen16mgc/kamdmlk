@@ -128,8 +128,9 @@ class MomentumStrategy:
         success = self.trader.buy(s, token_id, direction, worst_price=entry_max)
         if not success:
             # buy_blocked_until is already set by trader.buy() on rejection
+            cooldown = max(0, s.buy_blocked_until - time.time())
             logger.info(
-                f"BUY rejected — cooling down {config.BUY_REJECT_COOLDOWN}s before next attempt"
+                f"BUY rejected — cooling down {cooldown:.0f}s before next attempt"
             )
 
     def _check_exits(self, remaining: float):
