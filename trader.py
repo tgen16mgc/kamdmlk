@@ -100,8 +100,9 @@ class Trader:
             logger.error(f"Failed to fetch USDC balance: {e}")
             return 0.0
 
-    def get_token_balance(self, token_id: str) -> float:
-        """Fetch actual conditional token balance (shares held)."""
+    def get_token_balance(self, token_id: str) -> float | None:
+        """Fetch actual conditional token balance (shares held).
+        Returns None if the balance could not be fetched (API error)."""
         try:
             result = self.client.get_balance_allowance(
                 BalanceAllowanceParams(
@@ -114,7 +115,7 @@ class Trader:
             return balance
         except Exception as e:
             logger.debug(f"Failed to fetch token balance: {e}")
-            return 0.0
+            return None
 
     def buy(self, state: BotState, token_id: str, direction: str, worst_price: float = config.ENTRY_PRICE_MAX) -> bool:
         """
@@ -158,7 +159,7 @@ class Trader:
                 # Determine actual shares received (fees are deducted in shares)
                 shares = _parse_matched_size(result)
                 if shares is None or shares <= 0:
-                    shares = self.get_token_balance(token_id)
+                    shares = self.get_token_balance(token_id) or 0.0
                 if shares <= 0:
                     shares = amount / fill_price * 0.98  # conservative fallback
                     logger.warning(f"Could not determine exact shares, estimated: {shares:.4f}")
@@ -207,6 +208,32 @@ class Trader:
         state.sell_reason = reason
 
         total_attempts = state.sell_attempts
+
+        # ── Verify on-chain balance before retrying or giving up ─────────
+        # A previous sell attempt may have actually filled even though
+        # the API response did not return MATCHED.  If our token balance
+        # is effectively zero, close the position immediately.
+        if total_attempts > 0:
+            actual_balance = self.get_token_balance(pos.token_id)
+            if actual_balance is not None and actual_balance < 0.01:
+                exit_price = state.best_bid_for(pos.side) or pos.entry_price
+                pnl = (exit_price - pos.entry_price) * pos.shares
+                state.close_position(exit_price, reason)
+                balance = self.get_usdc_balance()
+                logger.warning(
+                    f"SELL ALREADY FILLED: token balance={actual_balance:.6f} — "
+                    f"previous attempt succeeded. Closing position."
+                )
+                log_trade(
+                    reason,
+                    f"{pos.side} exit (detected via balance check) @ ~${exit_price:.4f} | "
+                    f"entry=${pos.entry_price:.4f} | shares={pos.shares:.2f} | "
+                    f"attempt={total_attempts}",
+                    pnl=pnl,
+                    balance=balance,
+                )
+                return True
+
         use_fak = total_attempts >= config.SELL_MAX_RETRIES
         give_up = total_attempts >= (config.SELL_MAX_RETRIES + config.SELL_FAK_ATTEMPTS)
 
@@ -224,11 +251,11 @@ class Trader:
 
         # Use actual token balance to avoid "not enough balance" errors
         actual_balance = self.get_token_balance(pos.token_id)
-        sell_shares = actual_balance if actual_balance > 0 else pos.shares
+        sell_shares = actual_balance if (actual_balance is not None and actual_balance > 0) else pos.shares
 
         logger.info(
             f"SELLING ({reason}) {pos.side}: {sell_shares:.4f} shares "
-            f"(stored={pos.shares:.4f} actual={actual_balance:.4f}) | "
+            f"(stored={pos.shares:.4f} actual={'N/A' if actual_balance is None else f'{actual_balance:.4f}'}) | "
             f"type={type_label} attempt={total_attempts + 1} @ worst ${worst_price:.2f}"
         )
 

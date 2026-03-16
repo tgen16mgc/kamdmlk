@@ -141,11 +141,10 @@ class MomentumStrategy:
         if s.sell_pending:
             max_total = config.SELL_MAX_RETRIES + config.SELL_FAK_ATTEMPTS
             if s.sell_attempts >= max_total:
-                # We've exhausted all retries — just wait for market resolution
-                if remaining > 5:
-                    logger.debug(
-                        f"Sell gave up, waiting for resolution ({remaining:.0f}s left)"
-                    )
+                # We've exhausted all retries — verify on-chain balance in case
+                # a previous sell actually filled (the API may not have reported it).
+                # trader.sell() will detect zero balance and close the position.
+                self.trader.sell(s, s.sell_reason)
                 return
             self.trader.sell(s, s.sell_reason)
             return
