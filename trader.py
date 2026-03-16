@@ -136,6 +136,10 @@ class Trader:
             f"token={token_id[:16]}..."
         )
 
+        # Snapshot pre-trade token balance so verification can detect only
+        # NET NEW tokens (avoids false positives from pre-existing balance).
+        pre_balance = self.get_token_balance(token_id)
+
         state.buy_in_flight = True
         try:
             order = self.client.create_market_order(
@@ -179,7 +183,7 @@ class Trader:
             state.buy_blocked_until = time.time() + config.BUY_REJECT_COOLDOWN
 
             # Verify on-chain: order may have filled despite non-MATCHED status
-            if self._verify_buy_filled(state, token_id, direction, worst_price, amount, status):
+            if self._verify_buy_filled(state, token_id, direction, worst_price, amount, status, pre_balance):
                 return True
 
             return False
@@ -189,7 +193,7 @@ class Trader:
             state.buy_blocked_until = time.time() + config.BUY_REJECT_COOLDOWN
 
             # Verify on-chain: order may have filled despite the error
-            if self._verify_buy_filled(state, token_id, direction, worst_price, amount, f"error"):
+            if self._verify_buy_filled(state, token_id, direction, worst_price, amount, f"error", pre_balance):
                 return True
 
             return False
@@ -204,37 +208,107 @@ class Trader:
         worst_price: float,
         amount: float,
         status_info: str,
+        pre_balance: float | None = None,
     ) -> bool:
         """Check on-chain token balance after a failed buy.
 
-        If tokens were received, the order actually filled despite the
-        error / non-MATCHED status.  Open the position so it can be
-        managed (and eventually sold) by the strategy.
+        Waits before checking to allow chain settlement, retrying up to
+        FILL_VERIFY_RETRIES times.  Compares against *pre_balance* (the
+        balance snapshot taken before the order) so that pre-existing
+        tokens are not mistaken for a new fill.
         """
+        baseline = pre_balance if pre_balance is not None else 0.0
         try:
-            actual_balance = self.get_token_balance(token_id)
-            if (
-                actual_balance is not None
-                and actual_balance >= config.SELL_FILLED_BALANCE_THRESHOLD
-            ):
-                fill_price = worst_price  # best estimate without response data
-                shares = actual_balance
-                logger.warning(
-                    f"BUY ACTUALLY FILLED: token balance={actual_balance:.6f} "
-                    f"despite status={status_info} — opening position"
+            for attempt in range(config.FILL_VERIFY_RETRIES):
+                time.sleep(config.FILL_VERIFY_DELAY)
+                actual_balance = self.get_token_balance(token_id)
+                if actual_balance is None:
+                    logger.debug(
+                        f"Buy verify: balance API error on attempt {attempt + 1}"
+                    )
+                    break
+                net_new = actual_balance - baseline
+                if net_new >= config.SELL_FILLED_BALANCE_THRESHOLD:
+                    fill_price = worst_price  # best estimate without response data
+                    shares = net_new
+                    logger.warning(
+                        f"BUY ACTUALLY FILLED (attempt {attempt + 1}): "
+                        f"token balance={actual_balance:.6f} "
+                        f"(pre={baseline:.6f} net={net_new:.6f}) "
+                        f"despite status={status_info} — opening position"
+                    )
+                    state.open_position(token_id, direction, fill_price, shares)
+                    balance = self.get_usdc_balance()
+                    log_trade(
+                        "BUY",
+                        f"{direction} ~${amount:.2f} @ ~${fill_price:.4f} | "
+                        f"shares={shares:.4f} | "
+                        f"(detected via balance check, status was {status_info})",
+                        balance=balance,
+                    )
+                    return True
+                logger.debug(
+                    f"Buy verify attempt {attempt + 1}/{config.FILL_VERIFY_RETRIES}: "
+                    f"balance={actual_balance:.6f} net_new={net_new:.6f} < threshold"
                 )
-                state.open_position(token_id, direction, fill_price, shares)
-                balance = self.get_usdc_balance()
-                log_trade(
-                    "BUY",
-                    f"{direction} ~${amount:.2f} @ ~${fill_price:.4f} | "
-                    f"shares={shares:.4f} | "
-                    f"(detected via balance check, status was {status_info})",
-                    balance=balance,
-                )
-                return True
         except Exception as verify_err:
             logger.debug(f"Post-buy balance verification failed: {verify_err}")
+        return False
+
+    def _verify_sell_filled(self, state: BotState, reason: str, pre_balance: float | None = None) -> bool:
+        """Check on-chain token balance after a failed sell.
+
+        Waits before checking to allow chain settlement, retrying up to
+        FILL_VERIFY_RETRIES times.  If pre_balance was already below the
+        threshold (tokens were gone before we tried to sell), skip
+        verification to avoid false-positive closures.
+        """
+        pos = state.position
+        if pos is None:
+            return False
+
+        # If we know the balance was already empty before the sell order,
+        # a post-sell balance of 0 tells us nothing new — skip.
+        if pre_balance is not None and pre_balance < config.SELL_FILLED_BALANCE_THRESHOLD:
+            logger.debug(
+                f"Sell verify skipped: pre_balance={pre_balance:.6f} "
+                f"already below threshold"
+            )
+            return False
+
+        try:
+            for attempt in range(config.FILL_VERIFY_RETRIES):
+                time.sleep(config.FILL_VERIFY_DELAY)
+                actual_balance = self.get_token_balance(pos.token_id)
+                if actual_balance is None:
+                    logger.debug(
+                        f"Sell verify: balance API error on attempt {attempt + 1}"
+                    )
+                    break
+                if actual_balance < config.SELL_FILLED_BALANCE_THRESHOLD:
+                    exit_price = state.best_bid_for(pos.side) or pos.entry_price
+                    pnl = (exit_price - pos.entry_price) * pos.shares
+                    state.close_position(exit_price, reason)
+                    balance = self.get_usdc_balance()
+                    logger.warning(
+                        f"SELL ACTUALLY FILLED (attempt {attempt + 1}): "
+                        f"token balance={actual_balance:.6f} — "
+                        f"closing position (detected via post-sell verification)"
+                    )
+                    log_trade(
+                        reason,
+                        f"{pos.side} exit (detected via balance check) @ ~${exit_price:.4f} | "
+                        f"entry=${pos.entry_price:.4f} | shares={pos.shares:.2f}",
+                        pnl=pnl,
+                        balance=balance,
+                    )
+                    return True
+                logger.debug(
+                    f"Sell verify attempt {attempt + 1}/{config.FILL_VERIFY_RETRIES}: "
+                    f"balance={actual_balance:.6f} >= threshold, sell not yet confirmed"
+                )
+        except Exception as verify_err:
+            logger.debug(f"Post-sell balance verification failed: {verify_err}")
         return False
 
     def sell(self, state: BotState, reason: str) -> bool:
@@ -345,10 +419,11 @@ class Trader:
             # -- ORDER REJECTED --
             state.mark_sell_failed()
 
+            # Verify on-chain: sell may have filled despite non-MATCHED status
+            if self._verify_sell_filled(state, reason, pre_balance=actual_balance):
+                return True
+
             if use_fak:
-                # FAK may have partially filled — check if we still hold tokens
-                # For now, assume nothing filled on rejection; a future improvement
-                # would query the order to check size_matched.
                 logger.warning(
                     f"SELL {type_label} rejected: status={status} | "
                     f"Will retry next tick ({total_attempts + 1}/{config.SELL_MAX_RETRIES + config.SELL_FAK_ATTEMPTS})"
@@ -364,6 +439,11 @@ class Trader:
         except Exception as e:
             logger.error(f"SELL order error: {e}")
             state.mark_sell_failed()
+
+            # Verify on-chain: sell may have filled despite the error
+            if self._verify_sell_filled(state, reason, pre_balance=actual_balance):
+                return True
+
             return False
 
     def cancel_all_orders(self):

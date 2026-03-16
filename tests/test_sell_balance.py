@@ -23,10 +23,13 @@ class _FakeTrader(Trader):
         super().__init__()
         self.client = MagicMock()
         self._token_balance: float | None = 0.0
+        self._token_balances: list = []  # if non-empty, consumed in FIFO order
         self._usdc_balance: float = 10.0
 
     # Deterministic balance helpers
     def get_token_balance(self, token_id: str) -> float | None:
+        if self._token_balances:
+            return self._token_balances.pop(0)
         return self._token_balance
 
     def get_usdc_balance(self) -> float:
@@ -52,10 +55,11 @@ def _make_state_with_position(
     return state
 
 
+@patch("trader.time.sleep")
 class TestSellBalanceVerification(unittest.TestCase):
     """Verify that trader.sell() detects a previous fill via on-chain balance."""
 
-    def test_sell_detects_already_filled_on_retry(self):
+    def test_sell_detects_already_filled_on_retry(self, _mock_sleep):
         """After at least one failed attempt, if token balance is ~0 the
         position should be closed immediately without placing another order."""
         trader = _FakeTrader()
@@ -76,7 +80,7 @@ class TestSellBalanceVerification(unittest.TestCase):
         self.assertFalse(state.sell_pending, "sell_pending should be reset")
         self.assertEqual(state.sell_attempts, 0, "sell_attempts should be reset")
 
-    def test_sell_detects_already_filled_after_max_retries(self):
+    def test_sell_detects_already_filled_after_max_retries(self, _mock_sleep):
         """Even at the give-up threshold, balance check should detect the fill."""
         trader = _FakeTrader()
         state = _make_state_with_position()
@@ -94,7 +98,7 @@ class TestSellBalanceVerification(unittest.TestCase):
         self.assertIsNone(state.position)
         self.assertFalse(state.sell_pending)
 
-    def test_sell_does_not_falsely_close_on_api_error(self):
+    def test_sell_does_not_falsely_close_on_api_error(self, _mock_sleep):
         """If get_token_balance returns None (API error), do NOT close position.
         Instead, proceed normally with the sell order."""
         trader = _FakeTrader()
@@ -117,7 +121,7 @@ class TestSellBalanceVerification(unittest.TestCase):
         self.assertTrue(result)
         trader.client.post_order.assert_called_once()
 
-    def test_sell_first_attempt_skips_balance_check(self):
+    def test_sell_first_attempt_skips_balance_check(self, _mock_sleep):
         """On the very first sell attempt (sell_attempts=0), balance check
         should be skipped — we haven't failed yet."""
         trader = _FakeTrader()
@@ -139,7 +143,7 @@ class TestSellBalanceVerification(unittest.TestCase):
         trader.client.post_order.assert_called_once()
         self.assertTrue(result)
 
-    def test_sell_with_remaining_balance_continues_normally(self):
+    def test_sell_with_remaining_balance_continues_normally(self, _mock_sleep):
         """If token balance is still significant, proceed with the sell normally."""
         trader = _FakeTrader()
         state = _make_state_with_position()
@@ -161,12 +165,111 @@ class TestSellBalanceVerification(unittest.TestCase):
         self.assertIsNotNone(state.position, "Position should still exist")
         trader.client.post_order.assert_called_once()
 
+    def test_sell_verify_detects_fill_on_rejection(self, mock_sleep):
+        """After a sell rejection, _verify_sell_filled should detect
+        that tokens are gone and close the position."""
+        trader = _FakeTrader()
+        state = _make_state_with_position()
 
+        state.sell_pending = False
+        state.sell_attempts = 0
+
+        # Order rejected, but tokens actually left the account
+        trader.client.create_market_order.return_value = "mock_order"
+        trader.client.post_order.return_value = {"status": "REJECTED", "orderID": "abc"}
+
+        # Balance returns non-zero for inline checks, then 0 for verification
+        call_count = {"n": 0}
+        def _fake_balance(_tid):
+            call_count["n"] += 1
+            # First call: pre-sell balance lookup (sell_shares)
+            if call_count["n"] <= 1:
+                return 3.0
+            # Subsequent calls: post-rejection verification
+            return 0.0
+        trader.get_token_balance = _fake_balance
+
+        result = trader.sell(state, "SL")
+
+        self.assertTrue(result, "sell() should detect fill via post-rejection verification")
+        self.assertIsNone(state.position)
+
+    def test_sell_verify_detects_fill_on_exception(self, mock_sleep):
+        """After a sell exception, _verify_sell_filled should detect
+        that tokens are gone and close the position."""
+        trader = _FakeTrader()
+        state = _make_state_with_position()
+
+        state.sell_pending = False
+        state.sell_attempts = 0
+
+        # Order raises exception
+        trader.client.create_market_order.return_value = "mock_order"
+        trader.client.post_order.side_effect = Exception("API error")
+
+        # Pre-sell balance shows tokens, post-sell shows them gone
+        # Call 1: pre-sell balance = 3.0 (for sell_shares + pre_balance)
+        # Call 2: verification = 0.0 (tokens left despite error)
+        balances = iter([3.0, 0.0])
+        trader.get_token_balance = lambda _tid: next(balances)
+
+        result = trader.sell(state, "SL")
+
+        self.assertTrue(result, "sell() should detect fill via post-exception verification")
+        self.assertIsNone(state.position)
+
+    def test_sell_verify_retries_until_balance_drops(self, mock_sleep):
+        """Sell verification should retry when first check still shows tokens
+        but they disappear on a subsequent check (chain settlement delay)."""
+        trader = _FakeTrader()
+        state = _make_state_with_position()
+
+        state.sell_pending = False
+        state.sell_attempts = 0
+
+        trader.client.create_market_order.return_value = "mock_order"
+        trader.client.post_order.return_value = {"status": "REJECTED", "orderID": "abc"}
+
+        # First balance: pre-sell lookup (sell_shares)
+        # Second balance: verification attempt 1 (still there)
+        # Third balance: verification attempt 2 (gone)
+        balances = iter([3.0, 3.0, 0.0])
+        trader.get_token_balance = lambda _tid: next(balances)
+
+        result = trader.sell(state, "SL")
+
+        self.assertTrue(result, "sell() should detect fill on second verification attempt")
+        self.assertIsNone(state.position)
+        self.assertEqual(mock_sleep.call_count, 2)
+
+    def test_sell_no_false_positive_on_preempty_balance(self, _mock_sleep):
+        """If tokens were already gone before the sell order was placed,
+        a post-sell balance of 0 should NOT falsely close the position."""
+        trader = _FakeTrader()
+        state = _make_state_with_position()
+
+        state.sell_pending = False
+        state.sell_attempts = 0
+
+        trader.client.create_market_order.return_value = "mock_order"
+        trader.client.post_order.side_effect = Exception("API error")
+
+        # Pre-sell balance already 0 (tokens gone for some other reason)
+        # Post-sell also 0 — but this tells us nothing new
+        trader._token_balance = 0.0
+
+        result = trader.sell(state, "SL")
+
+        self.assertFalse(result, "sell() should not close position when pre-balance was already 0")
+        self.assertIsNotNone(state.position, "Position should still exist")
+
+
+@patch("trader.time.sleep")
 class TestStrategyExitRetry(unittest.TestCase):
     """Test that _check_exits calls trader.sell() even after give-up threshold,
     giving the balance-verification logic a chance to close the position."""
 
-    def test_check_exits_calls_sell_after_give_up(self):
+    def test_check_exits_calls_sell_after_give_up(self, _mock_sleep):
         """After exhausting retries, _check_exits should still call
         trader.sell() so the balance check can detect a filled position."""
         from strategy import MomentumStrategy
