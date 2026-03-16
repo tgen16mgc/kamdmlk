@@ -218,6 +218,8 @@ class Trader:
         tokens are not mistaken for a new fill.
         """
         baseline = pre_balance if pre_balance is not None else 0.0
+        if pre_balance is None:
+            logger.debug("Buy verify: no pre-balance snapshot, using baseline=0.0")
         try:
             for attempt in range(config.FILL_VERIFY_RETRIES):
                 time.sleep(config.FILL_VERIFY_DELAY)
@@ -230,7 +232,7 @@ class Trader:
                 net_new = actual_balance - baseline
                 if net_new >= config.SELL_FILLED_BALANCE_THRESHOLD:
                     fill_price = worst_price  # best estimate without response data
-                    shares = net_new
+                    shares = actual_balance  # track full balance for correct selling
                     logger.warning(
                         f"BUY ACTUALLY FILLED (attempt {attempt + 1}): "
                         f"token balance={actual_balance:.6f} "

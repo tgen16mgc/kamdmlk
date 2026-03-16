@@ -224,7 +224,7 @@ class TestBuyBalanceVerification(unittest.TestCase):
         trader.client.create_market_order.return_value = "mock_order"
         trader.client.post_order.return_value = {"status": "REJECTED", "orderID": "abc"}
         # Balance was 3.0 before AND after — no new tokens from this order
-        trader._token_balances = [3.0, 3.0, 3.0]  # pre + 2 verify attempts
+        trader._token_balances = [3.0, 3.0, 3.0]  # pre-balance + 2 verification attempts
 
         result = trader.buy(state, "tok_up_123", "Up", worst_price=0.65)
 

@@ -242,7 +242,7 @@ class TestSellBalanceVerification(unittest.TestCase):
         self.assertIsNone(state.position)
         self.assertEqual(mock_sleep.call_count, 2)
 
-    def test_sell_no_false_positive_on_preempty_balance(self, _mock_sleep):
+    def test_sell_no_false_positive_on_pre_empty_balance(self, _mock_sleep):
         """If tokens were already gone before the sell order was placed,
         a post-sell balance of 0 should NOT falsely close the position."""
         trader = _FakeTrader()
