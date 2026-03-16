@@ -19,8 +19,8 @@ RTDS_WS = "wss://ws-live-data.polymarket.com"
 MARKET_WS = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 
 # ── Entry Conditions ──────────────────────────────────────────────────────────
-ENTRY_WINDOW_MAX = 180  # seconds remaining (3 min) - enter no earlier
-ENTRY_WINDOW_MIN = 45   # seconds remaining (0:45) - enter no later
+ENTRY_WINDOW_MAX = 160  # seconds remaining (2 min 40 sec) - enter no earlier
+ENTRY_WINDOW_MIN = 50   # seconds remaining (0:50) - enter no later
 ENTRY_PRICE_MIN = 0.60  # minimum acceptable token price for entry (medium momentum)
 ENTRY_PRICE_MAX = 0.70  # maximum acceptable token price for entry (medium momentum)
 BTC_MOMENTUM_MIN = 30.0  # minimum BTC price change ($) from candle open (low tier)

@@ -57,7 +57,7 @@ class MomentumStrategy:
         if s.check_session_stop(config.SESSION_STOP_LOSS_PCT):
             return
 
-        # Condition 1: Time window (2:20 to 1:00 remaining)
+        # Condition 1: Time window (2:40 to 0:50 remaining)
         if remaining > config.ENTRY_WINDOW_MAX or remaining < config.ENTRY_WINDOW_MIN:
             return
 
