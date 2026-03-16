@@ -177,16 +177,65 @@ class Trader:
             # -- ORDER REJECTED --
             logger.warning(f"BUY rejected: status={status} | {result}")
             state.buy_blocked_until = time.time() + config.BUY_REJECT_COOLDOWN
-            state.buy_in_flight = False
+
+            # Verify on-chain: order may have filled despite non-MATCHED status
+            if self._verify_buy_filled(state, token_id, direction, worst_price, amount, status):
+                return True
+
             return False
 
         except Exception as e:
             logger.error(f"BUY order error: {e}")
             state.buy_blocked_until = time.time() + config.BUY_REJECT_COOLDOWN
-            state.buy_in_flight = False
+
+            # Verify on-chain: order may have filled despite the error
+            if self._verify_buy_filled(state, token_id, direction, worst_price, amount, f"error"):
+                return True
+
             return False
         finally:
             state.buy_in_flight = False
+
+    def _verify_buy_filled(
+        self,
+        state: BotState,
+        token_id: str,
+        direction: str,
+        worst_price: float,
+        amount: float,
+        status_info: str,
+    ) -> bool:
+        """Check on-chain token balance after a failed buy.
+
+        If tokens were received, the order actually filled despite the
+        error / non-MATCHED status.  Open the position so it can be
+        managed (and eventually sold) by the strategy.
+        """
+        try:
+            actual_balance = self.get_token_balance(token_id)
+            if (
+                actual_balance is not None
+                and actual_balance >= config.SELL_FILLED_BALANCE_THRESHOLD
+            ):
+                fill_price = worst_price  # best estimate without response data
+                shares = actual_balance
+                logger.warning(
+                    f"BUY ACTUALLY FILLED: token balance={actual_balance:.6f} "
+                    f"despite status={status_info} — opening position"
+                )
+                state.open_position(token_id, direction, fill_price, shares)
+                balance = self.get_usdc_balance()
+                log_trade(
+                    "BUY",
+                    f"{direction} ~${amount:.2f} @ ~${fill_price:.4f} | "
+                    f"shares={shares:.4f} | "
+                    f"(detected via balance check, status was {status_info})",
+                    balance=balance,
+                )
+                return True
+        except Exception as verify_err:
+            logger.debug(f"Post-buy balance verification failed: {verify_err}")
+        return False
 
     def sell(self, state: BotState, reason: str) -> bool:
         """
