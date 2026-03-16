@@ -140,6 +140,25 @@ class Trader:
         # NET NEW tokens (avoids false positives from pre-existing balance).
         pre_balance = self.get_token_balance(token_id)
 
+        # Guard: if a significant token balance already exists with no tracked
+        # position, a previous failed buy likely settled on-chain.  Open the
+        # position instead of placing another order (avoids double exposure).
+        if pre_balance is not None and pre_balance >= config.SELL_FILLED_BALANCE_THRESHOLD:
+            logger.warning(
+                f"BUY SKIPPED: pre-existing token balance={pre_balance:.6f} "
+                f"detected with no open position — previous buy likely settled. "
+                f"Opening position instead of placing duplicate order."
+            )
+            state.open_position(token_id, direction, worst_price, pre_balance)
+            balance = self.get_usdc_balance()
+            log_trade(
+                "BUY",
+                f"{direction} (settled from prior attempt) @ ~${worst_price:.4f} | "
+                f"shares={pre_balance:.4f}",
+                balance=balance,
+            )
+            return True
+
         state.buy_in_flight = True
         try:
             order = self.client.create_market_order(
@@ -180,22 +199,26 @@ class Trader:
 
             # -- ORDER REJECTED --
             logger.warning(f"BUY rejected: status={status} | {result}")
-            state.buy_blocked_until = time.time() + config.BUY_REJECT_COOLDOWN
 
             # Verify on-chain: order may have filled despite non-MATCHED status
             if self._verify_buy_filled(state, token_id, direction, worst_price, amount, status, pre_balance):
                 return True
 
+            # Reset cooldown AFTER verification so the window starts fresh.
+            # (Verification takes ~FILL_VERIFY_DELAY * FILL_VERIFY_RETRIES
+            # seconds; setting cooldown before would expire during that wait.)
+            state.buy_blocked_until = time.time() + config.BUY_REJECT_COOLDOWN
             return False
 
         except Exception as e:
             logger.error(f"BUY order error: {e}")
-            state.buy_blocked_until = time.time() + config.BUY_REJECT_COOLDOWN
 
             # Verify on-chain: order may have filled despite the error
             if self._verify_buy_filled(state, token_id, direction, worst_price, amount, f"error", pre_balance):
                 return True
 
+            # Reset cooldown AFTER verification (same reasoning as rejection path)
+            state.buy_blocked_until = time.time() + config.BUY_REJECT_COOLDOWN
             return False
         finally:
             state.buy_in_flight = False

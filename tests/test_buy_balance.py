@@ -124,9 +124,9 @@ class TestBuyBalanceVerification(unittest.TestCase):
         self.assertFalse(result, "buy() should return False when balance is unknown")
         self.assertIsNone(state.position, "Position should NOT be opened")
 
-    def test_buy_sets_cooldown_even_when_fill_detected(self, _mock_sleep):
-        """Even when a fill is detected via balance check, the buy cooldown
-        should still be set (it was set before the verification)."""
+    def test_buy_no_cooldown_when_fill_detected(self, _mock_sleep):
+        """When a fill is detected via balance check, no cooldown is needed
+        because the buy succeeded (position opened)."""
         trader = _FakeTrader()
         state = _make_state_no_position()
 
@@ -135,11 +135,11 @@ class TestBuyBalanceVerification(unittest.TestCase):
         # pre-balance=0, tokens appear in verification
         trader._token_balances = [0.0, 3.0]
 
-        before = time.time()
         trader.buy(state, "tok_up_123", "Up", worst_price=0.65)
 
-        # Cooldown should have been set (buy_blocked_until > now)
-        self.assertGreater(state.buy_blocked_until, before)
+        # Fill was detected → position opened → no cooldown needed
+        self.assertIsNotNone(state.position)
+        self.assertEqual(state.buy_blocked_until, 0.0)
 
     def test_buy_normal_matched_still_works(self, _mock_sleep):
         """Normal successful buy (MATCHED status) should still work as before."""
@@ -214,22 +214,90 @@ class TestBuyBalanceVerification(unittest.TestCase):
         import config
         mock_sleep.assert_called_with(config.FILL_VERIFY_DELAY)
 
-    def test_buy_no_false_positive_on_preexisting_balance(self, _mock_sleep):
-        """If tokens already existed before the buy attempt (e.g. from a
-        previous trade or manual deposit), the delta check should prevent
-        a false-positive position open."""
+    def test_buy_preflight_guard_opens_position_for_settled_tokens(self, _mock_sleep):
+        """If tokens already exist on-chain with no tracked position (e.g. from
+        a previous failed buy that settled), buy() should open the position
+        immediately without placing another order (prevents double exposure)."""
         trader = _FakeTrader()
         state = _make_state_no_position()
 
         trader.client.create_market_order.return_value = "mock_order"
         trader.client.post_order.return_value = {"status": "REJECTED", "orderID": "abc"}
-        # Balance was 3.0 before AND after — no new tokens from this order
-        trader._token_balances = [3.0, 3.0, 3.0]  # pre-balance + 2 verification attempts
+        # Pre-balance shows 3.0 tokens — settled from a prior failed buy
+        trader._token_balances = [3.0]
 
         result = trader.buy(state, "tok_up_123", "Up", worst_price=0.65)
 
-        self.assertFalse(result, "buy() should not open position when no new tokens detected")
+        self.assertTrue(result, "buy() should open position for pre-existing tokens")
+        self.assertIsNotNone(state.position, "Position should be opened")
+        self.assertAlmostEqual(state.position.shares, 3.0)
+        # Must NOT have placed an order (duplicate prevention)
+        trader.client.post_order.assert_not_called()
+
+    def test_buy_preflight_guard_skips_on_dust(self, _mock_sleep):
+        """Pre-flight guard should ignore dust balances below the threshold."""
+        trader = _FakeTrader()
+        state = _make_state_no_position()
+
+        trader.client.create_market_order.return_value = "mock_order"
+        trader.client.post_order.return_value = {"status": "MATCHED", "orderID": "abc",
+                                                  "sizeMatched": "2.0"}
+        # Pre-balance is dust (below SELL_FILLED_BALANCE_THRESHOLD=0.01)
+        trader._token_balances = [0.005]
+
+        result = trader.buy(state, "tok_up_123", "Up", worst_price=0.65)
+
+        self.assertTrue(result)
+        # Should have placed the order normally (dust ignored)
+        trader.client.post_order.assert_called_once()
+
+    def test_buy_cooldown_set_after_verification_not_before(self, _mock_sleep):
+        """buy_blocked_until should be set AFTER verification completes,
+        not before, so the cooldown window doesn't expire during verification."""
+        trader = _FakeTrader()
+        state = _make_state_no_position()
+
+        trader.client.create_market_order.return_value = "mock_order"
+        trader.client.post_order.return_value = {"status": "REJECTED", "orderID": "abc"}
+        # pre-balance=0, verification also returns 0 (no fill detected)
+        trader._token_balances = [0.0, 0.0, 0.0]
+
+        before = time.time()
+        trader.buy(state, "tok_up_123", "Up", worst_price=0.65)
+
+        # Cooldown must be set AFTER verification returned, so buy_blocked_until
+        # should be > now (which is after the ~2s verification period)
+        self.assertGreater(
+            state.buy_blocked_until, before,
+            "Cooldown should be set after verification, not before"
+        )
+
+    def test_buy_preflight_prevents_duplicate_order_scenario(self, _mock_sleep):
+        """Full scenario: buy #1 fails, tokens settle, buy #2 detects them
+        via pre-flight guard and opens position without placing another order."""
+        trader = _FakeTrader()
+        state = _make_state_no_position()
+
+        # --- Buy #1: fails, verification doesn't find fill yet ---
+        trader.client.create_market_order.return_value = "mock_order"
+        trader.client.post_order.return_value = {"status": "REJECTED", "orderID": "abc"}
+        trader._token_balances = [0.0, 0.0, 0.0]  # pre=0, verify=0, verify=0
+
+        result1 = trader.buy(state, "tok_up_123", "Up", worst_price=0.65)
+        self.assertFalse(result1)
         self.assertIsNone(state.position)
+
+        # --- Buy #1 settles on-chain (tokens appear) ---
+        # --- Buy #2: pre-flight guard detects the settled tokens ---
+        trader._token_balances = [3.0]  # pre-balance now shows settled tokens
+        trader.client.post_order.reset_mock()
+
+        result2 = trader.buy(state, "tok_up_123", "Up", worst_price=0.65)
+        self.assertTrue(result2, "buy #2 should detect settled tokens from buy #1")
+        self.assertIsNotNone(state.position)
+        self.assertAlmostEqual(state.position.shares, 3.0)
+        # Crucially: no new order was placed
+        trader.client.post_order.assert_not_called()
 
 
 if __name__ == "__main__":
