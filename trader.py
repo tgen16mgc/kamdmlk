@@ -217,8 +217,11 @@ class Trader:
             if self._verify_buy_filled(state, token_id, direction, worst_price, amount, f"error", pre_balance):
                 return True
 
-            # Reset cooldown AFTER verification (same reasoning as rejection path)
-            state.buy_blocked_until = time.time() + config.BUY_REJECT_COOLDOWN
+            # Use a longer cooldown after exceptions: the request may have been
+            # sent to the exchange and could settle on-chain well after our
+            # verification window.  A longer wait gives the pre-flight balance
+            # guard time to detect any late settlement on the next attempt.
+            state.buy_blocked_until = time.time() + config.BUY_EXCEPTION_COOLDOWN
             return False
         finally:
             state.buy_in_flight = False

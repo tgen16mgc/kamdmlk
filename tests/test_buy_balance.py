@@ -298,6 +298,58 @@ class TestBuyBalanceVerification(unittest.TestCase):
         # Crucially: no new order was placed
         trader.client.post_order.assert_not_called()
 
+    def test_buy_exception_uses_longer_cooldown(self, _mock_sleep):
+        """After an exception (order may be in-flight), the cooldown should
+        use BUY_EXCEPTION_COOLDOWN which is longer than BUY_REJECT_COOLDOWN
+        to prevent double orders from settling on-chain."""
+        import config
+        trader = _FakeTrader()
+        state = _make_state_no_position()
+
+        trader.client.create_market_order.return_value = "mock_order"
+        trader.client.post_order.side_effect = Exception("Request exception!")
+        # pre-balance=0, verification also returns 0 (no fill detected)
+        trader._token_balances = [0.0, 0.0, 0.0]
+
+        before = time.time()
+        result = trader.buy(state, "tok_up_123", "Up", worst_price=0.65)
+
+        self.assertFalse(result)
+        # Cooldown must use the longer BUY_EXCEPTION_COOLDOWN
+        expected_min = before + config.BUY_EXCEPTION_COOLDOWN
+        self.assertGreaterEqual(
+            state.buy_blocked_until, expected_min,
+            f"Exception cooldown should be at least {config.BUY_EXCEPTION_COOLDOWN}s, "
+            f"got {state.buy_blocked_until - before:.1f}s"
+        )
+
+    def test_buy_rejection_uses_short_cooldown(self, _mock_sleep):
+        """After a normal rejection (order definitively not accepted), the
+        cooldown should use the shorter BUY_REJECT_COOLDOWN."""
+        import config
+        trader = _FakeTrader()
+        state = _make_state_no_position()
+
+        trader.client.create_market_order.return_value = "mock_order"
+        trader.client.post_order.return_value = {"status": "REJECTED", "orderID": "abc"}
+        # pre-balance=0, verification also returns 0 (no fill detected)
+        trader._token_balances = [0.0, 0.0, 0.0]
+
+        before = time.time()
+        result = trader.buy(state, "tok_up_123", "Up", worst_price=0.65)
+
+        self.assertFalse(result)
+        # Cooldown must use the shorter BUY_REJECT_COOLDOWN (not the longer exception one)
+        cooldown_used = state.buy_blocked_until - before
+        self.assertLess(
+            cooldown_used, config.BUY_EXCEPTION_COOLDOWN,
+            "Rejection cooldown should be shorter than exception cooldown"
+        )
+        self.assertGreaterEqual(
+            cooldown_used, config.BUY_REJECT_COOLDOWN,
+            f"Rejection cooldown should be at least {config.BUY_REJECT_COOLDOWN}s"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
