@@ -116,7 +116,7 @@ class Trader:
             logger.debug(f"Failed to fetch token balance: {e}")
             return 0.0
 
-    def buy(self, state: BotState, token_id: str, direction: str) -> bool:
+    def buy(self, state: BotState, token_id: str, direction: str, worst_price: float = config.ENTRY_PRICE_MAX) -> bool:
         """
         Place a BUY market order (FOK) for the given token.
         On rejection, sets a cooldown so the strategy doesn't spam retries.
@@ -129,8 +129,6 @@ class Trader:
                 return False
         else:
             amount = config.BET_SIZE
-
-        worst_price = config.ENTRY_PRICE_MAX
 
         logger.info(
             f"BUYING {direction} token: ${amount:.2f} @ worst ${worst_price:.2f} | "

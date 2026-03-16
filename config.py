@@ -24,6 +24,9 @@ ENTRY_WINDOW_MIN = 60   # seconds remaining (1 min) - enter no later
 ENTRY_PRICE_MIN = 0.60  # minimum acceptable token price for entry
 ENTRY_PRICE_MAX = 0.70  # maximum acceptable token price for entry
 BTC_MOMENTUM_MIN = 45.0  # minimum BTC price change ($) from candle open
+BTC_MOMENTUM_HIGH = 65.0  # momentum threshold to shift entry price range
+ENTRY_PRICE_MIN_HIGH_MOM = 0.65  # min entry price when momentum >= BTC_MOMENTUM_HIGH
+ENTRY_PRICE_MAX_HIGH_MOM = 0.75  # max entry price when momentum >= BTC_MOMENTUM_HIGH
 MOMENTUM_VELOCITY_WINDOW = 15  # seconds to check momentum velocity
 MAX_SPREAD = 0.05  # max bid-ask spread to accept entry
 

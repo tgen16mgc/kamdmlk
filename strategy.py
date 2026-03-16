@@ -90,12 +90,19 @@ class MomentumStrategy:
         if direction == "Down" and velocity >= 0:
             return
 
-        # Condition 6: Entry price range (check the ask = cost to buy for THIS direction)
+        # Condition 6: Entry price range (higher momentum justifies paying more)
+        if abs_momentum >= config.BTC_MOMENTUM_HIGH:
+            entry_min = config.ENTRY_PRICE_MIN_HIGH_MOM
+            entry_max = config.ENTRY_PRICE_MAX_HIGH_MOM
+        else:
+            entry_min = config.ENTRY_PRICE_MIN
+            entry_max = config.ENTRY_PRICE_MAX
+
         token_price = s.best_ask_for(direction) or s.last_trade_for(direction)
         if token_price is None:
             return
 
-        if token_price < config.ENTRY_PRICE_MIN or token_price > config.ENTRY_PRICE_MAX:
+        if token_price < entry_min or token_price > entry_max:
             return
 
         # Condition 7: Spread guard
@@ -115,7 +122,7 @@ class MomentumStrategy:
             f"remaining={remaining:.0f}s"
         )
 
-        success = self.trader.buy(s, token_id, direction)
+        success = self.trader.buy(s, token_id, direction, worst_price=entry_max)
         if not success:
             # buy_blocked_until is already set by trader.buy() on rejection
             logger.info(
