@@ -41,7 +41,7 @@ BREAKEVEN_TIME_STOP_SECONDS = 35  # exit early if price <= entry with this many 
 HARD_TIME_STOP_SECONDS = 20  # absolute hard exit — sell no matter what below this
 
 # ── Bet Sizing ────────────────────────────────────────────────────────────────
-BET_SIZE = 2   # default bet in USDC
+BET_SIZE = 1   # default bet in USDC
 ALL_IN = False   # if True, use full USDC balance instead of BET_SIZE
 
 # ── Risk Management ──────────────────────────────────────────────────────────
@@ -62,6 +62,15 @@ FILL_VERIFY_RETRIES = 2     # number of balance-check attempts after a failed or
 # Set PROXY_URL in environment to route all traffic through a proxy.
 # Format: http://user:pass@host:port  or  http://host:port
 PROXY_URL = os.getenv("PROXY_URL", "")  # empty = no proxy
+
+# ── Adaptive Volatility ──────────────────────────────────────────────────
+ADAPTIVE_ENABLED = True        # set False to use fixed thresholds only
+ADAPTIVE_BASELINE = 45.0       # reference volatility ($) — the value config was tuned for
+ADAPTIVE_LOOKBACK = 20         # number of completed candles to track
+ADAPTIVE_EMA_ALPHA = 0.3       # EMA smoothing (higher = more responsive to recent candles)
+ADAPTIVE_MIN_MULTIPLIER = 0.5  # floor (prevents over-relaxed thresholds in dead markets)
+ADAPTIVE_MAX_MULTIPLIER = 3.0  # ceiling (prevents impossible thresholds in flash crashes)
+ADAPTIVE_MIN_CANDLES = 3       # candles needed before adaptation kicks in (~15 min warmup)
 
 # ── Timing ────────────────────────────────────────────────────────────────────
 STRATEGY_LOOP_INTERVAL = 0.1  # seconds between strategy ticks

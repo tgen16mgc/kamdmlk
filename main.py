@@ -79,7 +79,7 @@ async def market_discovery_loop(state: BotState):
 async def daily_report_loop(state: BotState, trader: Trader):
     """Send a summary report to Telegram twice a day at 08:00 and 20:00 UTC."""
     from telegram_notify import notify_daily_report
-    report_hours = {8, 20}
+    report_hours = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24}
     last_reported_hour: int = -1
 
     while state.running:
@@ -164,6 +164,14 @@ async def main():
         f"(${config.ENTRY_PRICE_MIN_HIGH_MOM}-${config.ENTRY_PRICE_MAX_HIGH_MOM})"
     )
     logger.info(f"Session stop-loss: {config.SESSION_STOP_LOSS_PCT * 100:.0f}% of starting balance")
+    logger.info(
+        f"Adaptive volatility: {'ENABLED' if config.ADAPTIVE_ENABLED else 'DISABLED'} | "
+        f"baseline=${config.ADAPTIVE_BASELINE} | "
+        f"lookback={config.ADAPTIVE_LOOKBACK} candles | "
+        f"EMA α={config.ADAPTIVE_EMA_ALPHA} | "
+        f"multiplier range=[{config.ADAPTIVE_MIN_MULTIPLIER}, {config.ADAPTIVE_MAX_MULTIPLIER}] | "
+        f"warmup={config.ADAPTIVE_MIN_CANDLES} candles"
+    )
     logger.info("=" * 60)
 
     state = BotState()

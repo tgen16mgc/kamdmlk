@@ -48,6 +48,7 @@ class MomentumStrategy:
     def _check_entry(self, remaining: float):
         """Evaluate all entry conditions."""
         s = self.state
+        vol = s.volatility  # adaptive volatility tracker
 
         # Guard: buy already in-flight (prevents double-entry during async order placement)
         if s.buy_in_flight:
@@ -69,12 +70,13 @@ class MomentumStrategy:
         if s.is_in_cooldown(config.CONSECUTIVE_LOSS_LIMIT, config.COOLDOWN_ROUNDS):
             return
 
-        # Condition 4: BTC momentum
+        # Condition 4: BTC momentum (adaptive thresholds)
         momentum = s.btc_momentum()
         if momentum is None:
             return
         abs_momentum = abs(momentum)
-        if abs_momentum < config.BTC_MOMENTUM_MIN:
+        adaptive_mom_min = vol.adaptive_momentum(config.BTC_MOMENTUM_MIN)
+        if abs_momentum < adaptive_mom_min:
             return
 
         # Determine direction: positive momentum = Up, negative = Down
@@ -90,16 +92,19 @@ class MomentumStrategy:
         if direction == "Down" and velocity >= 0:
             return
 
-        # Condition 6: Entry price range (3-tier: higher momentum justifies paying more)
-        if abs_momentum >= config.BTC_MOMENTUM_HIGH:
+        # Condition 6: Entry price range (3-tier with adaptive scaling)
+        adaptive_mom_med = vol.adaptive_momentum(config.BTC_MOMENTUM_MED)
+        adaptive_mom_high = vol.adaptive_momentum(config.BTC_MOMENTUM_HIGH)
+
+        if abs_momentum >= adaptive_mom_high:
             entry_min = config.ENTRY_PRICE_MIN_HIGH_MOM
-            entry_max = config.ENTRY_PRICE_MAX_HIGH_MOM
-        elif abs_momentum >= config.BTC_MOMENTUM_MED:
+            entry_max = vol.adaptive_entry_price_max(config.ENTRY_PRICE_MAX_HIGH_MOM)
+        elif abs_momentum >= adaptive_mom_med:
             entry_min = config.ENTRY_PRICE_MIN
-            entry_max = config.ENTRY_PRICE_MAX
+            entry_max = vol.adaptive_entry_price_max(config.ENTRY_PRICE_MAX)
         else:
             entry_min = config.ENTRY_PRICE_MIN_LOW_MOM
-            entry_max = config.ENTRY_PRICE_MAX_LOW_MOM
+            entry_max = vol.adaptive_entry_price_max(config.ENTRY_PRICE_MAX_LOW_MOM)
 
         token_price = s.best_ask_for(direction) or s.last_trade_for(direction)
         if token_price is None:
@@ -108,21 +113,24 @@ class MomentumStrategy:
         if token_price < entry_min or token_price > entry_max:
             return
 
-        # Condition 7: Spread guard
+        # Condition 7: Spread guard (adaptive)
+        adaptive_spread = vol.adaptive_spread(config.MAX_SPREAD)
         dir_bid = s.best_bid_for(direction)
         dir_ask = s.best_ask_for(direction)
         if dir_bid is not None and dir_ask is not None:
             spread = dir_ask - dir_bid
-            if spread > config.MAX_SPREAD:
-                logger.debug(f"Spread too wide: ${spread:.4f} > ${config.MAX_SPREAD}")
+            if spread > adaptive_spread:
+                logger.debug(f"Spread too wide: ${spread:.4f} > ${adaptive_spread:.4f}")
                 return
 
         # ALL CONDITIONS MET - ENTER
+        mult = vol.get_multiplier()
         logger.info(
             f"ENTRY SIGNAL: {direction} | "
             f"BTC momentum=${momentum:+.2f} velocity={velocity:+.4f}/s | "
             f"token_price=${token_price:.4f} | "
-            f"remaining={remaining:.0f}s"
+            f"remaining={remaining:.0f}s | "
+            f"vol_mult={mult:.2f} adaptive_mom_min=${adaptive_mom_min:.1f}"
         )
 
         success = self.trader.buy(s, token_id, direction, worst_price=entry_max)
@@ -137,6 +145,7 @@ class MomentumStrategy:
         """Evaluate exit conditions for the current position."""
         s = self.state
         pos = s.position
+        vol = s.volatility  # adaptive volatility tracker
 
         # If a sell is already pending (previous attempt failed), keep retrying
         if s.sell_pending:
@@ -159,15 +168,20 @@ class MomentumStrategy:
                 self.trader.sell(s, "TIME")
             return
 
-        # Exit 1: Take Profit
-        if current_price >= config.TAKE_PROFIT:
-            logger.info(f"TAKE PROFIT: price=${current_price:.4f} >= ${config.TAKE_PROFIT}")
+        # Adaptive TP / SL thresholds
+        adaptive_tp = vol.adaptive_tp(config.TAKE_PROFIT)
+        adaptive_sl = vol.adaptive_sl(config.STOP_LOSS)
+        adaptive_mom_min = vol.adaptive_momentum(config.BTC_MOMENTUM_MIN)
+
+        # Exit 1: Take Profit (adaptive)
+        if current_price >= adaptive_tp:
+            logger.info(f"TAKE PROFIT: price=${current_price:.4f} >= ${adaptive_tp:.4f} (base=${config.TAKE_PROFIT})")
             self.trader.sell(s, "TP")
             return
 
-        # Exit 2: Stop Loss
-        if current_price <= config.STOP_LOSS:
-            logger.info(f"STOP LOSS: price=${current_price:.4f} <= ${config.STOP_LOSS}")
+        # Exit 2: Stop Loss (adaptive)
+        if current_price <= adaptive_sl:
+            logger.info(f"STOP LOSS: price=${current_price:.4f} <= ${adaptive_sl:.4f} (base=${config.STOP_LOSS})")
             self.trader.sell(s, "SL")
             return
 
@@ -176,9 +190,9 @@ class MomentumStrategy:
             momentum = s.btc_momentum()
             momentum_supports = False
             if momentum is not None:
-                if pos.side == "Up" and momentum >= config.BTC_MOMENTUM_MIN:
+                if pos.side == "Up" and momentum >= adaptive_mom_min:
                     momentum_supports = True
-                elif pos.side == "Down" and momentum <= -config.BTC_MOMENTUM_MIN:
+                elif pos.side == "Down" and momentum <= -adaptive_mom_min:
                     momentum_supports = True
 
             if momentum_supports:
@@ -202,9 +216,9 @@ class MomentumStrategy:
                 momentum = s.btc_momentum()
                 momentum_supports = False
                 if momentum is not None:
-                    if pos.side == "Up" and momentum >= config.BTC_MOMENTUM_MIN:
+                    if pos.side == "Up" and momentum >= adaptive_mom_min:
                         momentum_supports = True
-                    elif pos.side == "Down" and momentum <= -config.BTC_MOMENTUM_MIN:
+                    elif pos.side == "Down" and momentum <= -adaptive_mom_min:
                         momentum_supports = True
 
                 if momentum_supports:
@@ -260,6 +274,10 @@ class MomentumStrategy:
             parts.append(f"mom=${momentum:+.2f}")
         if velocity is not None:
             parts.append(f"vel={velocity:+.2f}/s")
+
+        # Adaptive volatility status
+        parts.append(s.volatility.status_str())
+
         if s.up_best_bid is not None:
             parts.append(f"UP={s.up_best_bid:.2f}/{s.up_best_ask:.2f}" if s.up_best_ask else f"UP_bid={s.up_best_bid:.2f}")
         if s.down_best_bid is not None:

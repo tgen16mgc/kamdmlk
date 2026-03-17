@@ -2,6 +2,8 @@ import logging
 import time
 from dataclasses import dataclass, field
 
+from volatility_tracker import VolatilityTracker
+
 logger = logging.getLogger("state")
 
 
@@ -38,6 +40,9 @@ class BotState:
         self.losses: int = 0
         self.starting_balance: float = 0.0
         self.session_stopped: bool = False
+
+        # Adaptive volatility tracking
+        self.volatility = VolatilityTracker()
 
         # Current market info
         self.current_market_id: str | None = None
@@ -212,6 +217,11 @@ class BotState:
                 logger.info("COOLDOWN EXPIRED: Ready to trade again")
 
     def reset_for_new_market(self):
+        # Record completed candle's momentum for volatility tracking
+        if self.btc_candle_open is not None and self.btc_current is not None:
+            abs_mom = abs(self.btc_current - self.btc_candle_open)
+            self.volatility.record_candle(abs_mom)
+
         self.current_market_id = None
         self.current_condition_id = None
         self.up_token_id = None
